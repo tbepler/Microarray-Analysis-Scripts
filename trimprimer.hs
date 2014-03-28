@@ -1,6 +1,10 @@
 --takes the extracted names, sequences, and intensities produced by extract.hs and removes the primer sequence
 --of specified length from the sequences
 
+--usage: trimprimer primer_length < extracted microarray alldata
+
+--author: Tristan Bepler (tbepler@gmail.com)
+
 import System.Environment
 
 trimprimer :: Int -> String -> String

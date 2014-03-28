@@ -4,8 +4,10 @@
 --Column \t Row \t Name \t ID \t Sequence \t Cy3 \t Cy3Flags \t Alexa488 \t Alexa488Flags \t Cy3Exp \t Obs/Exp \t Alexa488Norm \t Alexa488Median \t Alexa488Adjusted
 --Alexa488Adjusted = intensities
 
---usage: extract [primer length] < microarray alldata file
+--usage: extract [primer_length] < microarray alldata file
 --outputs in the format: name \t trimmed sequence \t intensity
+
+--author: Tristan Bepler (tbepler@gmail.com)
 
 import Data.List.Split
 import System.Environment
