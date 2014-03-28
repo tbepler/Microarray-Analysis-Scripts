@@ -4,8 +4,12 @@
 
 --author: Tristan Bepler (tbepler@gmail.com)
 
+--requires the vector and statistics packages on hackage
+
 import Data.List
 import System.Environment
+import qualified Data.Vector as Vector
+import qualified Statistics.Sample as Stats
 
 --http://stackoverflow.com/a/16111081
 import qualified Data.Set as Set
@@ -34,18 +38,20 @@ core size probe = drop flank $ take (flank + size) (sqnc probe)
 cores :: Int -> [Probe] -> [String]
 cores size probes = rmdups $ map (core size) probes
 
-stats :: [Probe] -> [Double]
-stats probes = [meanVal, medianVal, minVal, maxVal, stdDev]
-	where 
-		inten = map (intensity) probes
-		maxVal = maximum inten
-		minVal = minimum inten
-		meanVal = mean inten
-		medianVal = median inten
-		stdDev = stddevp inten
+stats :: [Probe] -> (Int, [Double])
+stats probes = (num, [meanVal, medianVal, minVal, maxVal, stdDev])
+	where
+		listInten = map (intensity) probes
+		inten = Vector.fromList listInten
+		num = fromIntegral $ length listInten
+		maxVal = roundDec 2 $ Vector.maximum inten
+		minVal = roundDec 2 $ Vector.minimum inten
+		meanVal = roundDec 2 $ Stats.mean inten
+		medianVal = roundDec 2 $ median listInten
+		stdDev = roundDec 2 $ Stats.stdDev inten
 
-mean :: [Double] -> Double
-mean xs = (sum xs) / (fromIntegral (length xs))
+roundDec :: Int -> Double -> Double
+roundDec dec num = (fromIntegral $ round (num * 10^^dec)) / (fromIntegral 10^^dec)
 
 median :: [Double] -> Double
 median xs = if length xs `mod` 2 == 0
@@ -55,21 +61,17 @@ median xs = if length xs `mod` 2 == 0
 		sorted = sort xs
 		middle = ((length xs) `div` 2)
 
-stddevp :: [Double] -> Double
-stddevp xs = sqrt (sum $ map (\x-> ((x-m)**2)) xs) / (fromIntegral (length xs))
-	where m = mean xs
-
-coreStats :: [(String, [Probe])] -> [(String, [Double])]
+coreStats :: [(String, [Probe])] -> [(String, (Int, [Double]))]
 coreStats xs = map (\(coreSeq, probes) -> (coreSeq, stats probes)) xs
 
 statHeader :: String
-statHeader = unwords ["Core", "Mean", "Median", "Min", "Max", "StdDev"]
+statHeader = unwords ["Core", "Count", "Mean", "Median", "Min", "Max", "StdDev"]
 
-statsToString :: [(String, [Double])] -> String
+statsToString :: [(String, (Int, [Double]))] -> String
 statsToString stats = unlines $ [statHeader] ++ map (statToString) stats
 
-statToString :: (String, [Double]) -> String
-statToString (coreSeq, stats) = unwords $ [coreSeq] ++ (map (show) stats)
+statToString :: (String, (Int, [Double])) -> String
+statToString (coreSeq, (count, stats)) = unwords $ [coreSeq] ++ [(show count)] ++ (map (show) stats)
 
 toString :: [(String, [Probe])] -> String
 toString ((coreSeq, probes):xs) = coreSeq ++ "\n" ++ (unlines $ map (show) probes) ++ "\n" ++ toString xs
