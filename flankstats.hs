@@ -8,6 +8,7 @@
 
 import Data.List
 import System.Environment
+import qualified Data.Map as Map
 import qualified Data.Vector as Vector
 import qualified Statistics.Sample as Stats
 
@@ -28,8 +29,13 @@ instance Show Probe where
 	show probe = unwords [name probe, sqnc probe, show $ intensity probe]
 
 groupByCore :: Int -> [Probe] -> [(String, [Probe])]
-groupByCore coreSize probes = zip coreSeqs $ map (\x-> filter (\y-> x == (core coreSize y)) probes) coreSeqs
-	where coreSeqs = cores coreSize probes
+groupByCore coreSize probes = groupByCore' coreSize probes Map.empty where
+	groupByCore' :: Int -> [Probe] -> Map.Map String [Probe] -> [(String, [Probe])]
+	groupByCore' coreSize [] probeMap = Map.toList probeMap
+	groupByCore' coreSize (cur:remainder) probeMap = if Map.member coreSeq probeMap
+		then groupByCore' coreSize remainder (Map.insert coreSeq (cur : (probeMap Map.! coreSeq)) probeMap)
+		else groupByCore' coreSize remainder (Map.insert coreSeq [cur] probeMap)
+		where coreSeq = core coreSize cur
 
 core :: Int -> Probe -> String
 core size probe = drop flank $ take (flank + size) (sqnc probe)
