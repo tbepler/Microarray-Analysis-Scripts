@@ -1,3 +1,7 @@
 *.exe
 *.o
 *.hi
+*.sh
+extract
+flankstats
+trimprimer
