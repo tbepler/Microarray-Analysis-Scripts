@@ -1,4 +1,6 @@
 --produces statistics on the probes grouped by core sequence
+--for each core, reports the number of probes, mean intensity, median intensity, min intensity,
+--max intensity, and standard deviation of the intensity for probes with that core
 
 --usage: flankstats core=core_size < extracted microarray alldata file
 
