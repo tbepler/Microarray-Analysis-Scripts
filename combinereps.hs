@@ -73,13 +73,15 @@ probeKey (name, sqnc, scores) = if rep < 4 then sqnc else DNA.rvscmpl sqnc
 
 getConditions :: [(String, String, [Double])] -> [[Double]]
 getConditions [] = []
-getConditions ((name, sqnc, values) : xs) = map (\(x,y)-> [x]:y) $ zip values next
+getConditions [(_,_,values)] = map (\x -> [x]) values
+getConditions ((name, sqnc, values) : xs) = map (\(x,y)-> x:y) $ zip values next
 	where next = getConditions xs
 
-combine :: Handle -> (String, [(String, String, [Double])]) -> String
-combine reportTo (key, probes) = do
-	hPutStrLn reportTo $ reportCondition key names fwdMed rvsMed dif jointMed
-	unwords $ [key, commonPrefix names] ++ (combine' fwdMed rvsMed dif jointMed)
+combine :: (String, [(String, String, [Double])]) -> (String, String)
+combine (key, probes) = (
+	unwords $ [key, commonPrefix names] ++ (combine' fwdMed rvsMed dif jointMed),
+	reportCondition key (commonPrefix names) (length probes) fwdMed rvsMed dif jointMed
+	)
 	where
 		names = (map (\(x,_,_)->x) probes)
 		fwdProbes = filter (\(name, sqnc, values)-> key == sqnc) probes
@@ -92,33 +94,38 @@ combine reportTo (key, probes) = do
 		dif = map (\(x,y) -> abs (x-y)) $ zip fwdMed rvsMed
 		jointMed = map (median) combinedCond
  
-combine' :: [Double] -> [Double] -> [Double] -> [Double] -> [Double]
+combine' :: [Double] -> [Double] -> [Double] -> [Double] -> [String]
 combine' fwdMed rvsMed dif jointMed = map (\(a,b,c,d)-> combine'' a b c d) $ zip4 fwdMed rvsMed dif jointMed  where
 	combine'' w x y z
-		| y >= 0.5 = if w > x then w else x
-		| otherwise = z
+		| y >= 0.5 = if w > x then show w else show x
+		| otherwise = show z
 
-combineReps :: Handle -> [String] -> [(String, [(String, String, [Double])])] -> [String]
-combineReps reportTo header probeGroups = do
-	hPutStrLn reportTo $ reportHeader header $ head probeGroups
-	map (combine reportTo) probeGroups
+combineReps :: [(String, [(String, String, [Double])])] -> [(String,String)]
+combineReps probeGroups = map (combine) probeGroups
 
 
-reportCondition :: String -> [String] -> [Double] -> [Double] -> [Double] -> [Double] -> String
-reportCondition sqnc names fwdMed rvsMed dif jointMed = unwords $ [sqnc] ++ names ++ vals where
-	vals = concatMap (\(w,x,y,z)->[show w, show x, show y, show z]) zip4 fwdMed rvsMed dif jointMed
+reportCondition :: String -> String -> Int -> [Double] -> [Double] -> [Double] -> [Double] -> String
+reportCondition sqnc name occurences fwdMed rvsMed dif jointMed = unwords $ [sqnc, name, show occurences] ++ vals where
+	vals = concatMap (\(w,x,y,z)->[show w, show x, show y, show z]) $ zip4 fwdMed rvsMed dif jointMed
 
 reportHeader :: [String] -> (String, [(String, String, [Double])]) -> String
-reportHeader header (_, probes) = unwords $ ["Sequence"] ++ names ++ values where
-	names = take (length probes) $ map (\x-> "Name" ++ (show x)) [1..]
+reportHeader header (_, probes) = unwords $ ["Sequence", "Name", "Occurences"] ++ values where
 	values = concatMap (\x-> [x++"_Fwd_Median", x++"_Rvs_Median", x++"_Diff", x++"_Combined_Median"]) header
 
 main = do
 	args <- getArgs
 	reportTo <- if length args > 0 then openFile (head args) WriteMode else openFile "combinereps.log" WriteMode
-	h <- readLn
-	let header = tail $ tail $ words h
-	interact (\x-> combineReps reportTo $ Main.groupBy probeKey $ parseProbes $ lines x)
+	input <- getContents
+	let
+		(h : body) = lines input
+		header = tail $ tail $ words h
+		probeGroups = Main.groupBy probeKey $ parseProbes body
+		(output, report) = unzip $ combineReps probeGroups
+	hPutStrLn reportTo $ reportHeader header $ head probeGroups
+	hPutStrLn reportTo $ unlines report
+	hClose reportTo
+	putStrLn h
+	putStrLn $ unlines output
 
 
 
