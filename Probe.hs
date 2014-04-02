@@ -45,7 +45,7 @@ toString :: [Probe] -> String
 toString [] = ""
 toString probes = unlines $ (header $ head probes):rows where
 	rows = map (extract) probes
-	extract p = unwords $ [name p, Probe.seq p] ++ (map (show) vals) where
+	extract p = unwords $ [Probe.seq p, name p] ++ (map (show) vals) where
 		(_, vals) = unzip $ values p
 
 header :: Probe -> String
