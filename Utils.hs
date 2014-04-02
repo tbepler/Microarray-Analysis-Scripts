@@ -4,6 +4,7 @@
 
 module Utils where
 
+import Data.List
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 
@@ -25,11 +26,26 @@ quicksort (p:xs) = (quicksort lesser) ++ [p] ++ (quicksort greater)
 select :: Ord a => Int -> [a] -> a
 select n xs = (quicksort xs) !! n
 
-percentile :: (Fractional a, Ord a, RealFrac b) => b -> [a] -> a
-percentile p [] = error "Cannot find the percentil of an empty list"
-percentile p xs = ((select top xs) + (select bot xs)) / 2 where
-	top = ceiling ((fromIntegral ((length xs) - 1)) * p) 
-	bot = floor ((fromIntegral ((length xs) - 1)) * p) 
+range :: (Ord a, Num a) => [a] -> a
+range xs = (maximum xs) - (minimum xs)
+
+percentile :: (RealFrac a, Ord a) => a -> [a] -> a
+percentile p [] = error "Cannot find the percentile of an empty list"
+percentile p xs
+	| p < (head ranks) = minimum xs
+	| p > (last ranks) = maximum xs
+	| index >= 0 = select index xs
+	| otherwise = vbot + (p - pbot) * (vtop - vbot) / (ptop - pbot)
+	where
+		ranks = percentrank xs
+		(Just index) = if findIndex (\x-> p == x) ranks /= Nothing then findIndex (\x-> p == x) ranks else Just (-1)
+		ptop = minimum $ filter (\x-> x > p) ranks 
+		pbot = maximum $ filter (\x-> x < p) ranks
+		vtop = select n xs where (Just n) = findIndex (\x-> ptop == x) ranks
+		vbot = select n xs where (Just n) = findIndex (\x-> pbot == x) ranks
+
+percentrank :: (RealFrac b) => [a] -> [b]
+percentrank xs = map (\n-> 100.0 * ((fromIntegral n) - 0.5) / (fromIntegral m)) [1..m] where m = length xs
 
 median :: (Fractional a, Ord a) => [a] -> a
 median [] = error "Cannot find the median of an empty list"
@@ -39,7 +55,7 @@ median xs = if odd $ length xs then selodd else seleven where
 	seleven = ((select mid xs) + (select (mid-1) xs)) / 2
 	mid = (length xs) `div` 2
 
-iqr :: (Fractional a, Ord a) => [a] -> a
+iqr :: (RealFrac a, Ord a) => [a] -> a
 iqr [] = error "Cannot find the IQR of an empty list"
 iqr xs = (percentile 0.75 xs) - (percentile 0.25 xs)
 

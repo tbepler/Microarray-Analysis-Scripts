@@ -13,8 +13,8 @@ rmdups = rmdups' Set.empty where
 		else b : rmdups' (Set.insert b a) c
 
 data Probe = Probe {
-	name :: String,
 	seq :: String,
+	name :: String,
 	values :: [(String, Double)]
 	}
 
@@ -41,6 +41,16 @@ readProbes header lines = map (read' . words) lines
 		colnames = drop 2 $ words header
 		read' (n:s:xs) = Probe n s (zip colnames $ map (read) xs)
 		
+toString :: [Probe] -> String
+toString [] = ""
+toString probes = unlines $ (header $ head probes):rows where
+	rows = map (extract) probes
+	extract p = unwords $ [name p, Probe.seq p] ++ (map (show) vals) where
+		(_, vals) = unzip $ values p
+
+header :: Probe -> String
+header probe = unwords $ ["Sequence", "Name"] ++ colnames where
+	(colnames, vals) = unzip $ values probe 
 
 core :: Int -> Probe -> String
 core n probe = drop flank $ take (flank + n) (Probe.seq probe)
