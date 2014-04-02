@@ -57,7 +57,7 @@ median xs = if odd $ length xs then selodd else seleven where
 
 iqr :: (RealFrac a, Ord a) => [a] -> a
 iqr [] = error "Cannot find the IQR of an empty list"
-iqr xs = (percentile 0.75 xs) - (percentile 0.25 xs)
+iqr xs = (percentile 75.0 xs) - (percentile 25.0 xs)
 
 commonPrefix :: Eq a => [[a]] -> [a]
 commonPrefix [] = []
