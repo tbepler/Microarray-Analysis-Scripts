@@ -13,29 +13,34 @@ module Table where
 import Data.Typeable
 import Data.Char as Char
 
-data Table = Table {columns :: [Column]} deriving (Eq) 
+data Table = FromCols [Column] | FromRows [Row] deriving (Eq) 
 
 instance Show Table where
-	show (Table cols) = unlines $ (unwords $ colnames (Table cols)):(map (rowToString) $ colsToRows cols)
+	show (FromCols cols) = unlines $ (unwords $ colnames (FromCols cols)):(map (rowToString) $ colsToRows cols)
+	show (FromRows rows) = unlines $ (unwords $ colnames (FromRows rows)):(map (rowToString) rows)
 	
 instance Read Table where
-	readsPrec _ s = [(rowsToTable $ map (parseRow $ words header) body , "")] where
+	readsPrec _ s = [(FromRows $ map (parseRow $ words header) body , "")] where
 		(header:body) = lines s
 
+columns :: Table -> [Column]
+columns (FromCols cols) = cols
+columns (FromRows rows) = rowsToCols rows
+
 rows :: Table -> [Row]
-rows (Table cols) = colsToRows cols
+rows (FromCols cols) = colsToRows cols
+rows (FromRows rows) = rows
 
 colnames :: Table -> [String]
-colnames (Table cols) = map (name) cols
+colnames (FromCols cols) = map (name) cols
+colnames (FromRows ((Row x):_)) = names where
+	(names, _) = unzip x
 
 colsToRows :: [Column] -> [Row]
 colsToRows [] = []
 colsToRows cols = foldr (combine') [] cols where
 	combine' col [] = colToRows col
 	combine' col rows = map (\(x,y) -> concatRows x y) $ zip (colToRows col) rows
-
-rowsToTable :: [Row] -> Table
-rowsToTable rows = Table $ rowsToCols rows
 
 rowsToCols :: [Row] -> [Column]
 rowsToCols [] = []
