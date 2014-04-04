@@ -2,6 +2,8 @@
 *.o
 *.hi
 *.sh
+.*
+test_table
 extract
 flankstats
 trimprimer
