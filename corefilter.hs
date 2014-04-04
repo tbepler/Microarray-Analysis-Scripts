@@ -31,7 +31,6 @@ flags =
 	]
 
 parse argv = case getOpt Permute flags argv of
-	([], _, []) -> return [IQR 0, Count 0]
 	(args, _ , []) -> if elem Help args
 				then do hPutStrLn stderr (usageInfo header flags)
 					exitWith ExitSuccess
@@ -40,6 +39,12 @@ parse argv = case getOpt Permute flags argv of
 			hPutStrLn stderr (concat errs ++ usageInfo header flags)
 			exitWith (ExitFailure 1)
 	where header = "Usage: corefilter [-i/--iqr=iqr_cutoff] [-c/--count=count_cutoff] < core data"
+
+extractArgs :: [Flag] -> (Double, Int)
+extractArgs [] = (0, 0)
+extractArgs [(IQR i)] = (i, 0)
+extractArgs [(Count c)] = (0, c)
+extractArgs [(IQR i), (Count c)] = (i,c)
 
 iqrfilter :: Double -> [Table.Row] -> [Table.Row]
 iqrfilter cutoff rows = filter (meetsCriteria') rows where
@@ -54,6 +59,7 @@ countfilter cutoff rows = filter (\x-> (count x) >= cutoff) rows where
 	extractCount (Table.DoubleE d) = ceiling d
 
 main = do
-	[(IQR i), (Count c)] <- getArgs >>= parse
+	fl <- getArgs >>= parse
+	let (i,c) = extractArgs fl
 	interact ( show . Table.FromRows . countfilter c . iqrfilter i . readRows . lines) where
 		readRows (header:body) = map (Table.parseRow $ words header) body
