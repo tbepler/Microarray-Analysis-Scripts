@@ -15,16 +15,27 @@ import Data.Char as Char
 
 data Table = Table {columns :: [Column]} deriving (Eq) 
 
---instance Show Table where
+instance Show Table where
+	show (Table cols) = unlines $ (unwords $ colnames (Table cols)):(map (rowToString) $ colsToRows cols)
 	
+instance Read Table where
+	readsPrec _ s = [(rowsToTable $ map (parseRow $ words header) body , "")] where
+		(header:body) = lines s
+
 rows :: Table -> [Row]
 rows (Table cols) = colsToRows cols
+
+colnames :: Table -> [String]
+colnames (Table cols) = map (name) cols
 
 colsToRows :: [Column] -> [Row]
 colsToRows [] = []
 colsToRows cols = foldr (combine') [] cols where
 	combine' col [] = colToRows col
 	combine' col rows = map (\(x,y) -> concatRows x y) $ zip (colToRows col) rows
+
+rowsToTable :: [Row] -> Table
+rowsToTable rows = Table $ rowsToCols rows
 
 rowsToCols :: [Row] -> [Column]
 rowsToCols [] = []
@@ -60,6 +71,17 @@ rowToCols (Row xs) = map (unentry) xs where
 	unentry (name, IntE i) = IntCol name [i]
 	unentry (name, DoubleE d) = DoubleCol name [d]
 	unentry (name, StringE s) = StringCol name [s]
+
+rowToString :: Row -> String
+rowToString (Row xs) = unwords $ map (\(n,e)-> show e) xs
+
+parseRow :: [String] -> String -> Row
+parseRow [] s = Row $ zip (map (show) [1..]) (map (read) $ words s)
+parseRow header s = Row $ zip header $ map (read) $ words s
+
+rowEntries :: Row -> [Entry]
+rowEntries (Row xs) = entries where
+	(names, entries) = unzip xs
 	
 
 data Entry = IntE Int | DoubleE Double | StringE String deriving (Eq, Ord, Typeable)
