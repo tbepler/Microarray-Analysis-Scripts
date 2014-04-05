@@ -124,7 +124,7 @@ main = do
 	hPutStrLn reportTo $ reportHeader header $ head probeGroups
 	hPutStrLn reportTo $ unlines report
 	hClose reportTo
-	putStrLn h
+	putStrLn $ unwords $ ["Sequence", "Name"] ++ header
 	putStrLn $ unlines output
 
 

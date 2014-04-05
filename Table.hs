@@ -50,6 +50,10 @@ rowsToCols rows = foldr (combine') [] rows where
 
 data Column = IntCol {name :: String, intEntries :: [Int]} | DoubleCol {name :: String, doubleEntries :: [Double]} | StringCol {name :: String, stringEntries :: [String]} deriving (Eq, Ord)
 
+lookupCol :: String -> [Column] -> Maybe Column
+lookupCol n [] = Nothing
+lookupCol n (x:xs) = if name x == n then Just x else lookupCol n xs
+
 columnType :: Column -> TypeRep
 columnType (IntCol _ xs) = typeOf xs
 columnType (DoubleCol _ xs) = typeOf xs
@@ -67,6 +71,9 @@ colToRows (DoubleCol n xs) = map(\x-> Row [(n, DoubleE x)]) xs
 colToRows (StringCol n xs) = map(\x-> Row [(n, StringE x)]) xs
 
 data Row = Row [(String, Entry)] deriving (Eq, Ord)
+
+lookupEntry :: String -> Row -> Maybe Entry
+lookupEntry n (Row xs) = lookup n xs
 
 concatRows :: Row -> Row -> Row
 concatRows (Row a) (Row b) = Row (a ++ b)
