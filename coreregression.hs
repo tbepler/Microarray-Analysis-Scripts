@@ -57,7 +57,7 @@ probeCore cores row = core' cores sqnc where
 	core' (x:xs) s = if coreMatches x s then x else core' xs s
 
 regressionAnalysis :: (String, [Table.Row]) -> Table.Row
-regressionAnalysis (coreSeq, rows) = Table.Row ( [("Core", Table.StringE coreSeq), ("Count", Table.IntE $ length rows)] ++ (analysis vects) ) where
+regressionAnalysis (coreSeq, rows) = Table.Row ( [("Sequence", Table.StringE coreSeq), ("Name", Table.StringE ("Core" ++ (show $ length coreSeq))), ("Count", Table.IntE $ length rows)] ++ (analysis vects) ) where
 	cols = filter (\x-> (Table.columnType x) == (typeOf ([1.0] :: [Double]))) $ Table.rowsToCols rows
 	vects = map (\x-> (Table.name x, Vector.fromList $ Table.doubleEntries x)) cols
 	analysis [] = []
