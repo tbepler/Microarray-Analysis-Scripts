@@ -3,12 +3,14 @@
 --author: Tristan Bepler (tbepler@gmail.com)
 
 import qualified Table as Table
-import qualified Data.Vector as Vector
+import qualified Data.Vector.Unboxed as Vector
 import qualified Utils as Util
 import qualified DNA as DNA
 import Data.Maybe ( fromMaybe )
 import Data.List
+import Data.Typeable
 import Statistics.LinearRegression
+import Statistics.Types
 import System.Environment
 import System.Exit
 import System.IO
@@ -50,11 +52,20 @@ coreMatches x sqnc = (x == y) || ((DNA.rvscmpl x) == y) where y = core (length x
 
 probeCore :: [String] -> Table.Row -> String
 probeCore cores row = core' cores sqnc where
-	(Table.SequenceE sqnc) = Table.lookupEntry "Sequence" row
+	(Table.StringE sqnc) = fromMaybe (Table.StringE "") $ Table.lookupEntry "Sequence" row
 	core' [] s = ""
 	core' (x:xs) s = if coreMatches x s then x else core' xs s
 
 regressionAnalysis :: (String, [Table.Row]) -> Table.Row
+regressionAnalysis (coreSeq, rows) = Table.Row ( [("Core", Table.StringE coreSeq), ("Count", Table.IntE $ length rows)] ++ (analysis vects) ) where
+	cols = filter (\x-> (Table.columnType x) == (typeOf ([1.0] :: [Double]))) $ Table.rowsToCols rows
+	vects = map (\x-> (Table.name x, Vector.fromList $ Table.doubleEntries x)) cols
+	analysis [] = []
+	analysis [x] = []
+	analysis (x:xs) = (analysis' x xs) ++ analysis xs 
+	analysis' x [] = []
+	analysis' x (y:ys) = (analysis'' x y):(analysis' x ys)
+	analysis'' (s1, x) (s2, y) = (s1++"_"++s2, Table.DoubleE $ (correl x y)^2)
 
 
 main = do
@@ -63,4 +74,4 @@ main = do
 	probesfile <- readFile probesfilepath
 	let cores = Table.stringEntries $ fromMaybe (Table.StringCol "Sequence" []) $ Table.lookupCol "Sequence" $ Table.columns $ read coresfile
 	let probeGroups = filter (\(c, _) -> c /= "") $ Util.groupBy (probeCore cores) $ Table.rows $ read probesfile
-	putStrLn $ show cores
+	putStrLn $ show $ Table.FromRows $ map (regressionAnalysis) probeGroups
