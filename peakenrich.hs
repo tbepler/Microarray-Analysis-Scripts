@@ -26,14 +26,14 @@ data Flag
 	= Help
 	| Seqs String
 	| Genome String
-	| Overlap Double
+	| Distance Int
 	deriving (Eq, Ord, Show)
 
 flags = 
 	[ 
 	Option ['s'] ["seqs"] (ReqArg Seqs "FILE") "File containing sequences to calculate enrichment of",
 	Option ['g'] ["genome"] (ReqArg Genome "FILE") "Genome file in fasta format",
-	Option ['o'] ["overlap"] (OptArg parseOverlap "RATIO") "Cutoff for ratio of bases that need to be shared for peaks to be considered overlapping. Default = 0.0",
+	Option ['d'] ["distance"] (OptArg parseDistance "BASES") "Cutoff for distance between peaks to be considered in same region. Default = 0",
 	Option ['h'] ["help"] (NoArg Help) "Print this help message"
 	]
 
@@ -48,17 +48,17 @@ parse argv = case getOpt Permute flags argv of
 				else return (seqfilepath, genomefilepath, peakfilepaths, cutoff xs)
 				where
 					((Seqs seqfilepath):(Genome genomefilepath):xs) = nub $ sort args
-					cutoff [] = 0.0
-					cutoff [Overlap d] = d
-					cutoff _ = 0.0
+					cutoff [] = 0
+					cutoff [Distance d] = d
+					cutoff _ = 0
 	(_,_,errs) -> do
 			hPutStrLn stderr (concat errs ++ usageInfo header flags)
 			exitWith (ExitFailure 1)
 	where header = "Usage: peakenrich -s/--seqs=FILE -g/--genome=FILE NAME=PEAK_FILE..."
 
-parseOverlap :: Maybe String -> Flag
-parseOverlap (Nothing) = Overlap 0.0
-parseOverlap (Just s) = Overlap $ read s
+parseDistance :: Maybe String -> Flag
+parseDistance (Nothing) = Distance 0
+parseDistance (Just s) = Distance $ read s
 
 parsePeakArg :: String -> (String, String)
 parsePeakArg arg = parsePeakArg' False ("", "") arg where
@@ -78,7 +78,10 @@ main = do
 	--read in the peaks, classify them, and store them in a map by chromosome
 	let (peaknames, peakfilepaths) = unzip $ map (parsePeakArg) peakargs
 	peakfiles <- mapM (readFile) peakfilepaths
-	let peakmap = classify cutoff $ map (\(x,y)-> parsePeaks x y) $ zip peaknames peakfiles
+	let inputpeaks = map (\(x,y)-> parsePeaks x y) $ zip peaknames peakfiles
+	putStrLn $ unwords peaknames
+	putStrLn $ unwords $ map (show . Map.foldlWithKey (\b k a -> b + (length a)) 0) inputpeaks
+	let peakmap = classifyalt cutoff $ foldl (combine) Map.empty inputpeaks
 	--putStrLn $ unlines $ map (\(s, xs)-> unwords (s:(map (show) xs))) $ Util.groupBy classification $ expandPeakMap peakmap
 	let (cls, count) = unzip $ map (\(s, xs) -> (s, show $ length xs)) $ Util.groupBy classification $ expandPeakMap peakmap
 	putStrLn $ unlines $ (unwords cls):[(unwords count)]
@@ -210,6 +213,18 @@ classify cutoff xs = classify' (foldl combine Map.empty xs) xs where
 		ys' = map (removeAll overlap) ys
 		m' = Main.insert (joinPeaks (p:overlap)) m
 
+classifyalt :: Int -> Map.Map String [Peak] -> Map.Map String [Peak]
+classifyalt dist peaks = Map.map (classifyalt') peaks where
+	classifyalt' [] = []
+	classifyalt' (p:ps) = p':(classifyalt' ps') where
+		(p', ps') = classifyalt'' (start p, end p, [p]) ps
+	classifyalt'' (s,e,ps) ops
+		| ps' == [] = (joinPeaks ps, ops)
+		| otherwise = classifyalt'' (s',e',ps++ps') ops'
+		where
+			(ps', ops') = partition (\x-> (distance ([],[],s,e) x) <= dist) ops
+			(s', e') = foldl (\(a,b) y -> combinedSpan ([],[],a,b) y) (s,e) ps'
+
 insert :: Peak -> Map.Map String [Peak] -> Map.Map String [Peak]
 insert p m = Map.insert (chromosome p) (p:(fromMaybe [] $ Map.lookup (chromosome p) m)) m
 
@@ -230,12 +245,23 @@ joinPeaks [] = error "No peaks to join"
 joinPeaks [(desc, chr, s, e)] = (desc ++ "_Unique", chr, s, e)
 joinPeaks xs = (desc, chr, s, e) where
 	(_, chr, s, e) = joinPeaks' xs
-	desc = tail $ foldl (\x y-> x ++ "_" ++ y) "" $ nub $ sort $ map (\(d, _, _, _) -> d) xs
+	cats = nub $ sort $ map (\(d,_,_,_) -> d) xs
+	desc = if (length cats) == 1 then (head cats) ++ "_Unique" else tail $ foldl (\x y-> x ++ "_" ++ y) "" cats
 	joinPeaks' [p] = p
 	joinPeaks' (p:ps) = join' p $ joinPeaks' ps where
 		join' (_, aChr, aSt, aEnd) (_, bChr, bSt, bEnd) = ("", aChr, nStart, nEnd) where
-			nStart = if aSt > bSt then aSt else bSt
-			nEnd = if aEnd < bEnd then aEnd else bEnd
+			(nStart, nEnd) = combinedSpan ([],[],aSt,aEnd) ([],[],bSt,bEnd)
+
+combinedSpan :: Peak -> Peak -> (Int,Int)
+combinedSpan (_,_,s1,e1) (_,_,s2,e2) = (min s1 s2, max e1 e2)
+
+
+distance :: Peak -> Peak -> Int
+distance (_,_,s1,e1) (_,_,s2,e2)
+	| s1 < s2 = s2 - e1
+	| s2 < s1 = s1 - e2
+	| otherwise = max (s2-e1) (s1-e2) 
+	
 
 overlapPeaks:: Double -> Peak -> Map.Map String [Peak] -> [Peak]
 overlapPeaks d p m = filter (overlaps d p) chromPeaks where
