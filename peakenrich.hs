@@ -21,25 +21,60 @@ data Flag
 	= Help
 	| Seqs String
 	| Genome String
+	| Overlap Double
 	deriving (Eq, Ord, Show)
 
 flags = 
 	[ 
 	Option ['s'] ["seqs"] (ReqArg Seqs "FILE") "File containing sequences to calculate enrichment of",
 	Option ['g'] ["genome"] (ReqArg Genome "FILE") "Genome file in fasta format",
+	Option ['o'] ["overlap"] (OptArg parseOverlap "RATIO") "Cutoff for ratio of bases that need to be shared for peaks to be considered overlapping. Default = 0.0",
 	Option ['h'] ["help"] (NoArg Help) "Print this help message"
 	]
 
 parse argv = case getOpt Permute flags argv of
-	([Seqs seqfilepath, Genome genomefilepath], peakfilepaths, []) -> return (seqfilepath, genomefilepath, peakfilepaths)
-	([Genome genomefilepath, Seqs seqfilepath], peakfilepaths, []) -> return (seqfilepath, genomefilepath, peakfilepaths)
-	(_, _, []) -> do 
-			hPutStrLn stderr (usageInfo header flags)
-			exitWith ExitSuccess
+	([], _, []) -> do 
+					hPutStrLn stderr (usageInfo header flags)
+					exitWith ExitSuccess
+	(args, peakfilepaths , []) -> if elem Help args
+				then do 
+					hPutStrLn stderr (usageInfo header flags)
+					exitWith ExitSuccess
+				else return (seqfilepath, genomefilepath, peakfilepaths, cutoff xs)
+				where
+					((Seqs seqfilepath):(Genome genomefilepath):xs) = nub $ sort args
+					cutoff [] = 0.0
+					cutoff [Overlap d] = d
+					cutoff _ = 0.0
 	(_,_,errs) -> do
 			hPutStrLn stderr (concat errs ++ usageInfo header flags)
 			exitWith (ExitFailure 1)
 	where header = "Usage: peakenrich -s/--seqs=FILE -g/--genome=FILE NAME=PEAK_FILE..."
+
+parseOverlap :: Maybe String -> Flag
+parseOverlap (Nothing) = Overlap 0.0
+parseOverlap (Just s) = Overlap $ read s
+
+parsePeakArg :: String -> (String, String)
+parsePeakArg arg = parsePeakArg' False ("", "") arg where
+	parsePeakArg' False (left, "") [] = (left, left)
+	parsePeakArg' False (left, right) (x:xs) = if x == '=' then parsePeakArg' True (left, right) xs else parsePeakArg' False (left++[x], right) xs
+	parsePeakArg' True (left, right) [] = (left, right)
+	parsePeakArg' True (left, right) (x:xs) = parsePeakArg' True (left, right++[x]) xs
+ 
+main = do
+	(seqfilepath, genomefilepath, peakargs, cutoff) <- getArgs >>= parse
+	--read the seqfile and extract the sequences column from the file
+	seqfile <- readFile seqfilepath
+	let seqs = Table.stringEntries $ fromMaybe (Table.StringCol "Sequence" []) $ Table.lookupCol "Sequence" $ Table.columns $ read seqfile
+	--read the genome lazily as a bytestring
+	genomefile <- BL.readFile genomefilepath
+	let genome = BL.unpack genomefile
+	--read in the peaks, classify them, and store them in a map by chromosome
+	let (peaknames, peakfilepaths) = unzip $ map (parsePeakArg) peakargs
+	peakfiles <- mapM (readFile) peakfilepaths
+	let peakmap = classify cutoff $ map (\(x,y)-> parsePeaks x y) $ zip peaknames peakfiles
+	putStrLn $ unlines $ map (\(s, xs)-> unwords (s:(map (show) xs))) $ Util.groupBy classification $ expandPeakMap peakmap
 
 --peak = (classification, chromosome, start, end)
 type Peak = (String, String, Int, Int)
@@ -66,11 +101,11 @@ parsePeaks classification file = parse' (lines file) Map.empty where
 		m' = Map.insert chrom (p:(fromMaybe [] $ Map.lookup chrom m)) m
 	parse'' (chrom:start:end:_) = (classification, chrom, read start, read end)
 
-classify :: [Map.Map String [Peak]] -> Map.Map String [Peak]
-classify [] = Map.empty
-classify [x] = x
+classify :: Double -> [Map.Map String [Peak]] -> Map.Map String [Peak]
+classify cutoff [] = Map.empty
+classify cutoff [x] = x
 --classify xs = foldl combine Map.empty xs where
-classify xs = classify' (foldl combine Map.empty xs) xs where
+classify cutoff xs = classify' (foldl combine Map.empty xs) xs where
 
 	classify' :: Map.Map String [Peak] -> [Map.Map String [Peak]] -> Map.Map String [Peak]
 	classify' m [] = m
@@ -83,7 +118,7 @@ classify xs = classify' (foldl combine Map.empty xs) xs where
 
 	classify''' :: Map.Map String [Peak] -> Peak -> [Map.Map String [Peak]] -> (Map.Map String [Peak], [Map.Map String [Peak]])
 	classify''' m p ys = (m', ys') where
-		overlap = concatMap (overlapPeaks p) ys
+		overlap = concatMap (overlapPeaks cutoff p) ys
 		ys' = map (removeAll overlap) ys
 		m' = Main.insert (joinPeaks (p:overlap)) m
 
@@ -114,12 +149,12 @@ joinPeaks xs = (desc, chr, s, e) where
 			nStart = if aSt > bSt then aSt else bSt
 			nEnd = if aEnd < bEnd then aEnd else bEnd
 
-overlapPeaks:: Peak -> Map.Map String [Peak] -> [Peak]
-overlapPeaks p m = filter (overlaps p) chromPeaks where
+overlapPeaks:: Double -> Peak -> Map.Map String [Peak] -> [Peak]
+overlapPeaks d p m = filter (overlaps d p) chromPeaks where
 	chromPeaks = fromMaybe [] $ Map.lookup (chromosome p) m
 
-overlaps :: Peak -> Peak -> Bool
-overlaps (_, _, as, ae) (_, _, bs, be) = (((fromIntegral overlap) / (fromIntegral peakspan)) >= 0.1) where
+overlaps :: Double -> Peak -> Peak -> Bool
+overlaps d (_, _, as, ae) (_, _, bs, be) = (((fromIntegral overlap) / (fromIntegral peakspan)) > d) where
 	overlap
 		| (as > bs) && (bs >= ae) = bs - ae + 1
 		| (bs > as) && (as >= be) = as - be + 1
@@ -135,24 +170,3 @@ combine x y = foldl insert' Map.empty keys where
 	keys = nub $ sort $ (Map.keys x) ++ (Map.keys y)
 	combine' k = (fromMaybe [] $ Map.lookup k x) ++ (fromMaybe [] $ Map.lookup k y)
 	insert' m k = Map.insert k (combine' k) m
-
-parsePeakArg :: String -> (String, String)
-parsePeakArg arg = parsePeakArg' False ("", "") arg where
-	parsePeakArg' False (left, "") [] = (left, left)
-	parsePeakArg' False (left, right) (x:xs) = if x == '=' then parsePeakArg' True (left, right) xs else parsePeakArg' False (left++[x], right) xs
-	parsePeakArg' True (left, right) [] = (left, right)
-	parsePeakArg' True (left, right) (x:xs) = parsePeakArg' True (left, right++[x]) xs
- 
-main = do
-	(seqfilepath, genomefilepath, peakargs) <- getArgs >>= parse
-	--read the seqfile and extract the sequences column from the file
-	seqfile <- readFile seqfilepath
-	let seqs = Table.stringEntries $ fromMaybe (Table.StringCol "Sequence" []) $ Table.lookupCol "Sequence" $ Table.columns $ read seqfile
-	--read the genome lazily as a bytestring
-	genomefile <- BL.readFile genomefilepath
-	let genome = BL.unpack genomefile
-	--read in the peaks, classify them, and store them in a map by chromosome
-	let (peaknames, peakfilepaths) = unzip $ map (parsePeakArg) peakargs
-	peakfiles <- mapM (readFile) peakfilepaths
-	let peakmap = classify $ map (\(x,y)-> parsePeaks x y) $ zip peaknames peakfiles
-	putStrLn $ unlines $ map (\(s, xs)-> unwords (s:(map (show) xs))) $ Util.groupBy classification $ expandPeakMap peakmap
