@@ -11,11 +11,13 @@ import System.IO
 import System.Exit
 import Data.Maybe (fromMaybe)
 import Data.List
-import qualified Data.ByteString.Lazy as BL
+import qualified Data.ByteString.Lazy.Char8 as BL
 import qualified Data.Map as Map
+import qualified Data.Vector as Vector
 import qualified Table as Table
 import qualified Utils as Util
 
+import Debug.Trace
 
 data Flag
 	= Help
@@ -69,12 +71,17 @@ main = do
 	let seqs = Table.stringEntries $ fromMaybe (Table.StringCol "Sequence" []) $ Table.lookupCol "Sequence" $ Table.columns $ read seqfile
 	--read the genome lazily as a bytestring
 	genomefile <- BL.readFile genomefilepath
-	let genome = BL.unpack genomefile
+	let genome = BL.lines genomefile
 	--read in the peaks, classify them, and store them in a map by chromosome
 	let (peaknames, peakfilepaths) = unzip $ map (parsePeakArg) peakargs
 	peakfiles <- mapM (readFile) peakfilepaths
 	let peakmap = classify cutoff $ map (\(x,y)-> parsePeaks x y) $ zip peaknames peakfiles
-	putStrLn $ unlines $ map (\(s, xs)-> unwords (s:(map (show) xs))) $ Util.groupBy classification $ expandPeakMap peakmap
+	--putStrLn $ unlines $ map (\(s, xs)-> unwords (s:(map (show) xs))) $ Util.groupBy classification $ expandPeakMap peakmap
+	let (cls, count) = unzip $ map (\(s, xs) -> (s, show $ length xs)) $ Util.groupBy classification $ expandPeakMap peakmap
+	putStrLn $ unlines $ (unwords cls):[(unwords count)]
+	putStrLn $ showEnrichmentScores $ enrichment genome seqs peakmap
+
+	
 
 --peak = (classification, chromosome, start, end)
 type Peak = (String, String, Int, Int)
@@ -90,6 +97,81 @@ start (_, _, s, _) = s
 
 end :: Peak -> Int
 end (_, _, _, e) = e
+
+peakspan :: Peak -> Int
+peakspan (_, _, s, e) = e - s + 1
+
+showEnrichmentScores :: [(String, Map.Map String (Int, Int))] -> String
+showEnrichmentScores [] = ""
+showEnrichmentScores ((s, m):xs) = unlines $ (unwords ("Sequence":keys)):(map (toString') ((s, m):xs)) where
+	keys = Map.keys m
+	toString' (sqnc, mapping) = unwords (sqnc:(map (getEnrichment' mapping) keys))
+	getEnrichment' mapping key = show ((fromIntegral (inner+1))/(fromIntegral (outer+1)))  where
+		(inner, outer) = fromMaybe (0,0) $ Map.lookup key mapping
+
+byteStringToString :: BL.ByteString -> String
+byteStringToString bs
+	| BL.null bs = ""
+	| otherwise = (BL.head bs):(byteStringToString $ BL.tail bs)
+
+byteStringToVector :: BL.ByteString -> Vector.Vector Char
+byteStringToVector bs
+	| BL.null bs = Vector.empty
+	| otherwise = Vector.cons (BL.head bs) (byteStringToVector $ BL.tail bs)
+
+--takes the genome, sequences, and peaks and computes the enrichment of each sequence for each peak
+enrichment :: [BL.ByteString] -> [String] -> Map.Map String [Peak] -> [(String, Map.Map String (Int, Int))]
+enrichment genome seqs peakMap = scores' where
+	(scores', _, _, _) = foldl' (\(w,x,y,z) a-> w `seq` x `seq` y `seq` z `seq` (nextLine (w,x,y,z) a)) (zip seqs $ repeat Map.empty, Vector.empty, 1, []) genome
+	--scores are [(Sequence, Map PeakClass (InnerCount, OuterCount))]
+	nextLine (scores, cur, index, peaks) next = if (BL.head next) == '>'
+				then (scores, Vector.empty, 1, getPeaks $ byteStringToString $ BL.tail next)
+				else processLine scores cur index peaks next
+
+	getPeaks chrom = sort $ map (processPeak) $ fromMaybe [] $ Map.lookup chrom peakMap
+
+	processPeak peak = (s, e, peak) where
+		s = max 1 $ (start peak) - ((peakspan peak) `div` 2)
+		e = (end peak) + ((peakspan peak) `div` 2)
+	
+	processLine scores cur index [] next = (scores, Vector.empty, 1, [])
+	processLine scores cur index peaks next 
+		| (ps <= e) = processLine' scores (cur Vector.++ (byteStringToVector next)) index peaks
+		| otherwise = (scores, Vector.empty, e, peaks)
+		where
+			(ps, pe, p) = head peaks
+			e = index + Vector.length cur + (fromIntegral $ BL.length next)
+
+	processLine' scores cur index [] = (scores, Vector.empty, 1, [])
+	processLine' scores cur index (p:peaks) = if within index endIndex pstart pend
+		then seq updatedScores $ processLine' updatedScores cur index peaks
+		else (scores, cur', index', (p:peaks))
+		where
+			(pstart, pend, peak) = p
+			los = Vector.slice (pstart - index) ((start peak) - pstart) cur
+			is = Vector.slice ((start peak) - index) ((end peak) - (start peak) + 1) cur
+			ros = Vector.slice ((end peak) - index + 1) (pend - (end peak)) cur
+			updatedScores = scorePeak scores los is ros $ classification peak
+			endIndex = index + (Vector.length cur) - 1
+			index' = min pstart $ endIndex + 1
+			cur' = Vector.drop (index' - index) cur
+
+	within s1 e1 s2 e2 = (s1 <= s2) && (e1 >= e2)
+
+	scorePeak scores los is ros cls = seq scores $ seq los $ seq is $ seq ros $ map (\(sqnc, m) -> seq m $ (sqnc, updateScore sqnc m los is ros cls)) scores
+
+	updateScore sqnc m los is ros cls = seq count' $ Map.insert cls count' m where
+		(innercount, outercount) = fromMaybe (0,0) $ Map.lookup cls m
+		count' = seq innercount $ seq outercount $ (innercount + (occurences sqnc is), outercount + (occurences sqnc los) + (occurences sqnc ros))
+
+	occurences s1 s2 = length $ filter (matches' s1) $ map (\x-> Vector.slice x (length s1) s2) [0..((Vector.length s2) - (length s1))]
+
+	matches' s v
+		| s == [] && Vector.null v = True
+		| s == [] || Vector.null v = False
+		| (head s) /= (Vector.head v) = False
+		| otherwise = matches' (tail s) (Vector.tail v)
+
 
 --returns a mapping of chromosome to all peaks on that chromosome
 parsePeaks :: String -> String -> Map.Map String [Peak]
