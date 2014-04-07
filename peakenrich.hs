@@ -11,6 +11,7 @@ import System.IO
 import System.Exit
 import Data.Maybe (fromMaybe)
 import Data.List
+import Control.DeepSeq
 import qualified Data.ByteString.Lazy.Char8 as BL
 import qualified Data.Map as Map
 import qualified Data.Vector as Vector
@@ -121,6 +122,9 @@ byteStringToVector bs
 	| BL.null bs = Vector.empty
 	| otherwise = Vector.cons (BL.head bs) (byteStringToVector $ BL.tail bs)
 
+instance (NFData k, NFData a) => NFData (Map.Map k a) where
+	 rnf = rnf . Map.toList
+
 --takes the genome, sequences, and peaks and computes the enrichment of each sequence for each peak
 enrichment :: [BL.ByteString] -> [String] -> Map.Map String [Peak] -> [(String, Map.Map String (Int, Int))]
 enrichment genome seqs peakMap = scores' where
@@ -146,7 +150,7 @@ enrichment genome seqs peakMap = scores' where
 
 	processLine' scores cur index [] = (scores, Vector.empty, 1, [])
 	processLine' scores cur index (p:peaks) = if within index endIndex pstart pend
-		then seq updatedScores $ processLine' updatedScores cur index peaks
+		then deepseq updatedScores $ processLine' updatedScores cur index peaks
 		else (scores, cur', index', (p:peaks))
 		where
 			(pstart, pend, peak) = p
@@ -160,7 +164,7 @@ enrichment genome seqs peakMap = scores' where
 
 	within s1 e1 s2 e2 = (s1 <= s2) && (e1 >= e2)
 
-	scorePeak scores los is ros cls = seq scores $ seq los $ seq is $ seq ros $ map (\(sqnc, m) -> seq m $ (sqnc, updateScore sqnc m los is ros cls)) scores
+	scorePeak scores los is ros cls = map (\(sqnc, m) -> seq m $ (sqnc, updateScore sqnc m los is ros cls)) scores
 
 	updateScore sqnc m los is ros cls = seq count' $ Map.insert cls count' m where
 		(innercount, outercount) = fromMaybe (0,0) $ Map.lookup cls m
