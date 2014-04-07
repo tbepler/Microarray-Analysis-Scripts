@@ -14,6 +14,7 @@ import Data.List
 import qualified Data.ByteString.Lazy.Char8 as BL
 import qualified Data.Map as Map
 import qualified Data.Vector as Vector
+import qualified Data.Char as Char
 import qualified Table as Table
 import qualified Utils as Util
 import qualified DNA as DNA
@@ -170,7 +171,7 @@ enrichment genome seqs peakMap = scores' where
 	matches' s v
 		| s == [] && Vector.null v = True
 		| s == [] || Vector.null v = False
-		| (head s) /= (Vector.head v) = False
+		| ((Char.toLower $ head s) /= (Vector.head v)) && ((Char.toUpper $ head s) /= (Vector.head v)) = False
 		| otherwise = matches' (tail s) (Vector.tail v)
 
 
