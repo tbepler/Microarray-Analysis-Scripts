@@ -16,6 +16,7 @@ import qualified Data.Map as Map
 import qualified Data.Vector as Vector
 import qualified Table as Table
 import qualified Utils as Util
+import qualified DNA as DNA
 
 import Debug.Trace
 
@@ -164,7 +165,7 @@ enrichment genome seqs peakMap = scores' where
 		(innercount, outercount) = fromMaybe (0,0) $ Map.lookup cls m
 		count' = seq innercount $ seq outercount $ (innercount + (occurences sqnc is), outercount + (occurences sqnc los) + (occurences sqnc ros))
 
-	occurences s1 s2 = length $ filter (matches' s1) $ map (\x-> Vector.slice x (length s1) s2) [0..((Vector.length s2) - (length s1))]
+	occurences s1 s2 = length $ filter (\x-> (matches' s1 x) || (matches' (DNA.rvscmpl s1) x)) $ map (\x-> Vector.slice x (length s1) s2) [0..((Vector.length s2) - (length s1))]
 
 	matches' s v
 		| s == [] && Vector.null v = True
