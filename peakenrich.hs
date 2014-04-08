@@ -79,9 +79,10 @@ main = do
 	let (peaknames, peakfilepaths) = unzip $ map (parsePeakArg) peakargs
 	peakfiles <- mapM (readFile) peakfilepaths
 	let inputpeaks = map (\(x,y)-> parsePeaks x y) $ zip peaknames peakfiles
-	putStrLn $ unwords peaknames
-	putStrLn $ unwords $ map (show . Map.foldlWithKey (\b k a -> b + (length a)) 0) inputpeaks
-	let peakmap = classifyalt cutoff $ foldl (combine) Map.empty inputpeaks
+	let inputpeakmap = foldl (combine) Map.empty inputpeaks
+	--putStrLn $ unwords peaknames
+	--putStrLn $ unwords $ map (show . Map.foldlWithKey (\b k a -> b + (length a)) 0) inputpeaks
+	let peakmap = combine (classifyalt cutoff inputpeakmap) inputpeakmap
 	--putStrLn $ unlines $ map (\(s, xs)-> unwords (s:(map (show) xs))) $ Util.groupBy classification $ expandPeakMap peakmap
 	let (cls, count) = unzip $ map (\(s, xs) -> (s, show $ length xs)) $ Util.groupBy classification $ expandPeakMap peakmap
 	putStrLn $ unlines $ (unwords cls):[(unwords count)]
