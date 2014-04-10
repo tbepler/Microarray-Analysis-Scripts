@@ -126,8 +126,8 @@ byteStringToVector bs
 	| BL.null bs = Vector.empty
 	| otherwise = Vector.cons (BL.head bs) (byteStringToVector $ BL.tail bs)
 
-instance (NFData k, NFData a) => NFData (Map.Map k a) where
-	 rnf = rnf . Map.toList
+--instance (NFData k, NFData a) => NFData (Map.Map k a) where
+--	 rnf = rnf . Map.toList
 
 --takes the genome, sequences, and peaks and computes the enrichment of each sequence for each peak
 enrichment :: [BL.ByteString] -> [String] -> Map.Map String [Peak] -> [(String, Map.Map String (Int, Int))]
@@ -212,12 +212,12 @@ classify cutoff xs = classify' (foldl combine Map.empty xs) xs where
 	classify''' m p ys = (m', ys') where
 		overlap = concatMap (overlapPeaks cutoff p) ys
 		ys' = map (removeAll overlap) ys
-		m' = Main.insert (joinPeaks (p:overlap)) m
+		m' = foldl (flip Main.insert) m $ joinPeaks (p:overlap)
 
 classifyalt :: Int -> Map.Map String [Peak] -> Map.Map String [Peak]
 classifyalt dist peaks = Map.map (classifyalt') peaks where
 	classifyalt' [] = []
-	classifyalt' (p:ps) = p':(classifyalt' ps') where
+	classifyalt' (p:ps) = p'++(classifyalt' ps') where
 		(p', ps') = classifyalt'' (start p, end p, [p]) ps
 	classifyalt'' (s,e,ps) ops
 		| ps' == [] = (joinPeaks ps, ops)
@@ -241,10 +241,10 @@ remove p m = Map.adjust (remove' p) (chromosome p) m where
 expandPeakMap :: Map.Map String [Peak] -> [Peak]
 expandPeakMap m = Map.fold (\x y-> x ++ y) [] m
 
-joinPeaks :: [Peak] -> Peak
+joinPeaks :: [Peak] -> [Peak]
 joinPeaks [] = error "No peaks to join"
-joinPeaks [(desc, chr, s, e)] = (desc ++ "_Unique", chr, s, e)
-joinPeaks xs = (desc, chr, s, e) where
+joinPeaks [(desc, chr, s, e)] = [(desc ++ "_Unique", chr, s, e)]
+joinPeaks xs = if length cats <= 1 then [(desc, chr, s, e)] else (desc, chr, s, e):(map (\str-> (str++"_NonUnique",chr,s,e)) cats) where
 	(_, chr, s, e) = joinPeaks' xs
 	cats = nub $ sort $ map (\(d,_,_,_) -> d) xs
 	desc = if (length cats) == 1 then (head cats) ++ "_Unique" else tail $ foldl (\x y-> x ++ "_" ++ y) "" cats
