@@ -89,8 +89,8 @@ main = do
 	--putStrLn $ unlines $ map (\(s, xs)-> unwords (s:(map (show) xs))) $ Util.groupBy classification $ expandPeakMap peakmap
 	let (cls, count) = unzip $ map (\(s, xs) -> (s, show $ length xs)) $ Util.groupBy classification $ expandPeakMap peakmap
 	--putStrLn $ unlines $ (unwords cls):[(unwords count)]
-	putStrLn $ showEnrichmentScores $ enrichment genome seqs inputpeakmap
-	--putStrLn $ showEnrichmentScores $ seqenrichment $ enrichmentalt genomefile seqsalt inputpeakmap
+	--putStrLn $ showEnrichmentScores $ enrichment genome seqs inputpeakmap
+	putStrLn $ showEnrichmentScores $ seqenrichment $ enrichmentalt genomefile seqsalt inputpeakmap
 
 	
 
@@ -117,7 +117,7 @@ showEnrichmentScores [] = ""
 showEnrichmentScores ((s, m):xs) = unlines $ (unwords ("Sequence":keys)):(map (toString') ((s, m):xs)) where
 	keys = Map.keys m
 	toString' (sqnc, mapping) = unwords (sqnc:(map (getEnrichment' mapping) keys))
-	getEnrichment' mapping key = show ((fromIntegral (inner+1))/(fromIntegral (outer+1)))  where
+	getEnrichment' mapping key = show (inner,outer)  where
 		(inner, outer) = fromMaybe (0,0) $ Map.lookup key mapping
 
 
@@ -140,7 +140,7 @@ enrichment genome seqs peakMap = scores' where
 	(scores', _, _, _) = foldl' (\(w,x,y,z) a-> w `seq` x `seq` y `seq` z `seq` (nextLine (w,x,y,z) a)) (zip seqs $ repeat Map.empty, Vector.empty, 1, []) genome
 	--scores are [(Sequence, Map PeakClass (InnerCount, OuterCount))]
 	nextLine (scores, cur, index, peaks) next = if (B.head next) == '>'
-				then (scores, Vector.empty, 1, getPeaks $ byteStringToString $ B.tail next)
+				then trace (byteStringToString $ next) (scores, Vector.empty, 1, getPeaks $ byteStringToString $ B.tail next)
 				else processLine scores cur index peaks next
 
 	getPeaks chrom = sort $ map (processPeak) $ fromMaybe [] $ Map.lookup chrom peakMap
@@ -219,7 +219,7 @@ enrichmentalt g seqs peakmap = enrichment where
 
 	processChromName :: Accumulator -> Char -> Accumulator
 	{-# INLINE processChromName #-}
-	processChromName (_, si, ei, str, peakregions, enrichment) '\n' = (chromSeq, 1, 1, [], getPeakRegions $ reverse str, enrichment)
+	processChromName (_, si, ei, str, peakregions, enrichment) '\n' = trace (reverse str) (chromSeq, 1, 1, [], getPeakRegions $ reverse str, enrichment)
 	processChromName (_, si, ei, str, peakregions, enrichment) c = (chromName, si, ei, c:str, peakregions, enrichment)
 
 	getPeakRegions :: [Char] -> [PeakRegion]
