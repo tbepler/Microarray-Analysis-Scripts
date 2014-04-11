@@ -5,6 +5,8 @@
 
 --Usage: peakenrich -s/--seqs=FILE -g/--genome=FILE NAME=PEAK_FILE...
 
+{-# LANGUAGE BangPatterns #-}
+
 import System.Console.GetOpt
 import System.Environment
 import System.IO
@@ -12,9 +14,9 @@ import System.Exit
 import Data.Maybe (fromMaybe)
 import Data.List
 import Control.DeepSeq
-import qualified Data.ByteString.Lazy.Char8 as BL
+import qualified Data.ByteString.Lazy.Char8 as B
 import qualified Data.Map as Map
-import qualified Data.Vector as Vector
+import qualified Data.Vector.Unboxed as Vector
 import qualified Data.Char as Char
 import qualified Table as Table
 import qualified Utils as Util
@@ -72,9 +74,10 @@ main = do
 	--read the seqfile and extract the sequences column from the file
 	seqfile <- readFile seqfilepath
 	let seqs = Table.stringEntries $ fromMaybe (Table.StringCol "Sequence" []) $ Table.lookupCol "Sequence" $ Table.columns $ read seqfile
+	let seqsalt = map (\x-> (Vector.fromList x, Vector.fromList $ DNA.rvscmpl x)) seqs
 	--read the genome lazily as a bytestring
-	genomefile <- BL.readFile genomefilepath
-	let genome = BL.lines genomefile
+	genomefile <- B.readFile genomefilepath
+	let genome = B.lines genomefile
 	--read in the peaks, classify them, and store them in a map by chromosome
 	let (peaknames, peakfilepaths) = unzip $ map (parsePeakArg) peakargs
 	peakfiles <- mapM (readFile) peakfilepaths
@@ -85,8 +88,9 @@ main = do
 	let peakmap = combine (classifyalt cutoff inputpeakmap) inputpeakmap
 	--putStrLn $ unlines $ map (\(s, xs)-> unwords (s:(map (show) xs))) $ Util.groupBy classification $ expandPeakMap peakmap
 	let (cls, count) = unzip $ map (\(s, xs) -> (s, show $ length xs)) $ Util.groupBy classification $ expandPeakMap peakmap
-	putStrLn $ unlines $ (unwords cls):[(unwords count)]
-	putStrLn $ showEnrichmentScores $ enrichment genome seqs peakmap
+	--putStrLn $ unlines $ (unwords cls):[(unwords count)]
+	putStrLn $ showEnrichmentScores $ enrichment genome seqs inputpeakmap
+	--putStrLn $ showEnrichmentScores $ seqenrichment $ enrichmentalt genomefile seqsalt inputpeakmap
 
 	
 
@@ -116,26 +120,27 @@ showEnrichmentScores ((s, m):xs) = unlines $ (unwords ("Sequence":keys)):(map (t
 	getEnrichment' mapping key = show ((fromIntegral (inner+1))/(fromIntegral (outer+1)))  where
 		(inner, outer) = fromMaybe (0,0) $ Map.lookup key mapping
 
-byteStringToString :: BL.ByteString -> String
+
+byteStringToString :: B.ByteString -> String
 byteStringToString bs
-	| BL.null bs = ""
-	| otherwise = (BL.head bs):(byteStringToString $ BL.tail bs)
+	| B.null bs = ""
+	| otherwise = (B.head bs):(byteStringToString $ B.tail bs)
 
-byteStringToVector :: BL.ByteString -> Vector.Vector Char
+byteStringToVector :: B.ByteString -> Vector.Vector Char
 byteStringToVector bs
-	| BL.null bs = Vector.empty
-	| otherwise = Vector.cons (BL.head bs) (byteStringToVector $ BL.tail bs)
+	| B.null bs = Vector.empty
+	| otherwise = Vector.cons (B.head bs) (byteStringToVector $ B.tail bs)
 
---instance (NFData k, NFData a) => NFData (Map.Map k a) where
---	 rnf = rnf . Map.toList
+instance (NFData k, NFData a) => NFData (Map.Map k a) where
+	 rnf = rnf . Map.toList
 
 --takes the genome, sequences, and peaks and computes the enrichment of each sequence for each peak
-enrichment :: [BL.ByteString] -> [String] -> Map.Map String [Peak] -> [(String, Map.Map String (Int, Int))]
+enrichment :: [B.ByteString] -> [String] -> Map.Map String [Peak] -> [(String, Map.Map String (Int, Int))]
 enrichment genome seqs peakMap = scores' where
 	(scores', _, _, _) = foldl' (\(w,x,y,z) a-> w `seq` x `seq` y `seq` z `seq` (nextLine (w,x,y,z) a)) (zip seqs $ repeat Map.empty, Vector.empty, 1, []) genome
 	--scores are [(Sequence, Map PeakClass (InnerCount, OuterCount))]
-	nextLine (scores, cur, index, peaks) next = if (BL.head next) == '>'
-				then (scores, Vector.empty, 1, getPeaks $ byteStringToString $ BL.tail next)
+	nextLine (scores, cur, index, peaks) next = if (B.head next) == '>'
+				then (scores, Vector.empty, 1, getPeaks $ byteStringToString $ B.tail next)
 				else processLine scores cur index peaks next
 
 	getPeaks chrom = sort $ map (processPeak) $ fromMaybe [] $ Map.lookup chrom peakMap
@@ -150,7 +155,7 @@ enrichment genome seqs peakMap = scores' where
 		| otherwise = (scores, Vector.empty, e, peaks)
 		where
 			(ps, pe, p) = head peaks
-			e = index + Vector.length cur + (fromIntegral $ BL.length next)
+			e = index + Vector.length cur + (fromIntegral $ B.length next)
 
 	processLine' scores cur index [] = (scores, Vector.empty, 1, [])
 	processLine' scores cur index (p:peaks) = if within index endIndex pstart pend
@@ -182,6 +187,83 @@ enrichment genome seqs peakMap = scores' where
 		| ((Char.toLower $ head s) /= (Vector.head v)) && ((Char.toUpper $ head s) /= (Vector.head v)) = False
 		| otherwise = matches' (tail s) (Vector.tail v)
 
+
+type Genome = B.ByteString
+type Sequence = (Vector.Vector Char, Vector.Vector Char)
+type Enrichment = [(Vector.Vector Char, (Int, Int))]
+newtype Reading = Reading Int deriving (Eq, Ord)
+(chromName,chromSeq) = (Reading 1, Reading 2)
+type Accumulator = (Reading, Int, Int, [Char], [PeakRegion], [(Peak, Enrichment)])
+type PeakRegion = (Int, Int, Peak)
+
+seqenrichment :: [(Peak, Enrichment)] -> [(String, Map.Map String (Int, Int))]
+seqenrichment [] = []
+seqenrichment peakE = calc peakE Map.empty where
+	calc [] coremap = Map.toList coremap
+	calc ((p,e):xs) coremap = calc xs $ foldl' (\m (core,(i,o))-> updateCore (Vector.toList core) (cls, (i,o)) m) coremap e where
+		cls = classification p
+	updateCore k (cls, (x',y')) m = Map.insert k m' m where m' = updateCls cls (x',y') $ fromMaybe Map.empty $ Map.lookup k m
+	updateCls k (x',y') m = Map.insert k (x'+x, y'+y) m where (x,y) = fromMaybe (0,0) $ Map.lookup k m
+
+enrichmentalt :: Genome -> [Sequence] -> Map.Map String [Peak] -> [(Peak, Enrichment)]
+--process the genome character by character
+enrichmentalt g seqs peakmap = enrichment where
+	emptyAccumulator = (chromSeq, 1, 1, [], [], [])
+	(_, _, _, _, _, enrichment) = B.foldl' (processChar) (emptyAccumulator) g
+
+	--take the current accumulated state, process the new character, and return the new state
+	processChar :: Accumulator -> Char -> Accumulator
+	processChar (state, si, ei, str, peakregions, enrichment) c
+		| state == chromName = processChromName (state, si, ei, str, peakregions, enrichment) c
+		| state == chromSeq = processChromSeq (state, si, ei, str, peakregions, enrichment) c
+
+	processChromName :: Accumulator -> Char -> Accumulator
+	{-# INLINE processChromName #-}
+	processChromName (_, si, ei, str, peakregions, enrichment) '\n' = (chromSeq, 1, 1, [], getPeakRegions $ reverse str, enrichment)
+	processChromName (_, si, ei, str, peakregions, enrichment) c = (chromName, si, ei, c:str, peakregions, enrichment)
+
+	getPeakRegions :: [Char] -> [PeakRegion]
+	{-# INLINE getPeakRegions #-}
+	getPeakRegions str = sort $ filter (\(s,e,p)-> s > 0) $ map (\p-> ((start p) - ceiling((fromIntegral $ peakspan p)/2), (end p) + ceiling((fromIntegral $ peakspan p)/2) , p)) $ fromMaybe [] $ Map.lookup str peakmap
+
+	processChromSeq :: Accumulator -> Char -> Accumulator
+	{-# INLINE processChromSeq #-}
+	processChromSeq accum '\n' = accum
+	processChromSeq (_, _, _, _, _, enrichment) '>' = (chromName, 1, 1, [], [], enrichment)
+	processChromSeq (_, si, ei, str, [], enrichment) c = (chromSeq, 1, 1, [], [], enrichment)
+	processChromSeq (_, si, ei, str, (pr:peakregions), enrichment) c
+		| s > ei = (chromSeq, ei+1, ei+1, [], (pr:peakregions), enrichment)
+		| otherwise = processChromSeq' si (ei+1) (c:str) (pr:peakregions) enrichment
+		where (s, _, _) = pr
+	
+	processChromSeq' :: Int -> Int -> [Char] -> [PeakRegion] -> [(Peak,Enrichment)] -> Accumulator
+	{-# INLINE processChromSeq' #-}
+	processChromSeq' si ei str [] enrichment = (chromSeq, si, ei, str, [], enrichment)
+	processChromSeq' si ei str (pr:peakregions) !enrichment
+		| e > ei = (chromSeq, si, ei, str, (pr:peakregions), enrichment)
+		| otherwise = processChromSeq' si ei str peakregions ((p, processPeakRegion pr $ reverse $ take (e - s + 1) str):enrichment)
+		where (s, e, p) = pr
+
+	processPeakRegion :: PeakRegion -> [Char] -> Enrichment
+	{-# INLINE processPeakRegion #-}
+	processPeakRegion (s, e, p) str = map (\(x,y)-> (x, (innerCount (x,y), outerCount (x,y)))) seqs where
+		innerCount sqnc = count' sqnc peakseq
+		outerCount sqnc = (count' sqnc lflank) + (count' sqnc rflank)
+		lflank = take ((start p) - s) str
+		rflank = drop ((end p) - e + 1) str
+		peakseq = take (peakspan p) $ drop ((start p) - s) str
+
+	count' :: Sequence -> [Char] -> Int
+	{-# INLINE count' #-}
+	count' (fwd, rvs) str = count'' fwd rvs 0 str where
+		count'' xs ys !num [] = num
+		count'' xs ys !num zs = if (prefix' xs zs) || (prefix' ys zs) then count'' xs ys (num+1) (tail zs) else count'' xs ys num (tail zs)
+		prefix' xs zs
+			| (Vector.null xs) && (zs == []) = True
+			| Vector.null xs = False
+			| zs == [] = False
+			| (Vector.head xs) /= (head zs) = False
+			| otherwise = prefix' (Vector.tail xs) (tail zs)
 
 --returns a mapping of chromosome to all peaks on that chromosome
 parsePeaks :: String -> String -> Map.Map String [Peak]
