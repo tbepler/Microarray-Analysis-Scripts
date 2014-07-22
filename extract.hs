@@ -53,4 +53,4 @@ main = do
 	let
 		primer = if length args >= 1 then read $ head args else 0
 		header = any (\x->x=="--header") args
-	interact (\x-> unlines $ extract header primer $ lines x)
+	interact (\x-> unlines $ ( (unwords ["Name","Sequence","Intensity"]) : (extract header primer $ lines x)))
