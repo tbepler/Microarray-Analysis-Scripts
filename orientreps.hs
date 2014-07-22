@@ -1,6 +1,8 @@
 --This script assigns a score to replicate probes by selecting the median score
 --of the replicates oriented in the same direction as a given PWM
 
+--Author: Tristan Bepler (tbepler@gmail.com)
+
 import qualified Data.Map as Map
 import System.Environment
 import System.Exit
