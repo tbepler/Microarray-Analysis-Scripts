@@ -55,9 +55,15 @@ orientAsString Fwd = "Fwd"
 orientAsString Rvs = "Rvs"
 
 orient pwm str = if score < rvsScore then Rvs else Fwd where
-	score = maxScore pwm str
-	rvsScore = maxScore pwm rvscomp
+	score = scoreCenter pwm str
+	rvsScore = scoreCenter pwm rvscomp
 	rvscomp = rvsCompliment str
+
+scoreCenter pwm str = score pwm center where
+	center = take pwmLen $ drop flank str
+	flank = (strLen - pwmLen) `div` 2
+	strLen = length str 
+	pwmLen = pwmLength pwm
 
 maxScore pwm str = maximum $ map (score pwm) substrs where
 	substrs = map ((take len).flip drop str) [0..((length str)-len)]
