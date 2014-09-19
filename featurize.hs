@@ -1,31 +1,56 @@
 
+import qualified Data.Ord as Ord
+import qualified Data.List as List
 import qualified Data.Set as Set
 import qualified Data.Vector as Vector
 
 alphabet = "ACGT"
 kmerlens = [1, 2, 3]
-test = Vector.fromList "AATCG"
+test = map (Vector.fromList) ["AATCG", "GGTCA", "ACGTT" ]
 
-main = putStrLn (unlines $ (header feats):[featureVecToString testfeats]) where
-	testfeats = featurize kmerlens feats test
+main = interact $ parse alphabet kmerlens{- putStrLn (toString feats "" testfeats) -} where
+	testfeats = map (featurize kmerlens feats) test
 	feats = features alphabet kmerlens len
-	len = Vector.length test
+	len = Vector.length $ head test
 
-header fs = unwords $ header' fs where
-	header' [] = [""]
-	header' (x:xs) = (featureToString x):(header' xs)
+parse alphabet kmerlens input = toString feats "" $ map (featurize kmerlens feats) sqncs where
+	ls = parselines $ lines input
+	sqncs = map (\(x,y) -> x) ls
+	len = Vector.length $ head sqncs
+	feats = features alphabet kmerlens len
+
+toString feats y vecs = unlines $ (header feats y):(map (featVecToString) vecs)
+
+header fs y = unwords $ header' fs y where
+	header' [] y = [y]
+	header' (x:xs) y = (featureToString x):(header' xs y)
 
 featureToString (i,k) = "["++(show i)++"]"++(Vector.toList k)
 
-featureVecToString fvec = unwords $ map (str) fvec where
-	str (f, True) = "1"
-	str (f, False) = "0"
+featVecToString bvec = unwords $ map (\x -> if x then "1" else "0") bvec
 
-features alphabet kmerlens len = concatMap (\k -> [ (i,k) | i<-[1..(len - (Vector.length k) + 1)]] ) kmers where
+toBinaryVector fvec = map (bin) fvec where
+	bin (f, True) = 1
+	bin (f, False) = 0
+
+features alphabet kmerlens len = List.sortBy sort $ concatMap (\k -> [ (i,k) | i<-[1..(len - (Vector.length k) + 1)]] ) kmers where
 	kmers = map (Vector.fromList) $ concatMap ( \n -> comb n alphabet ) kmerlens
+	comp (i,k1) (j,k2)
+		| (Vector.length k1) /= (Vector.length k2) = (Vector.length k1) - (Vector.length k2)
+		| i /= j = i - j
+		| k1 < k2 = -1
+		| k1 > k2 = 1
+		| otherwise = 0
+	sort a b
+		| ord < 0 = Ord.LT
+		| ord > 0 = Ord.GT
+		| otherwise = Ord.EQ
+		where ord = comp a b
 
-featurize kmerlens fs s =  map (\f -> (f, Set.member f fSet) ) fs  where
+
+featurize kmerlens fs s =  map ( contains ) fs  where
 	fSet = foldl (\set e -> Set.insert (feature e s) set) Set.empty $ concatMap ( \n -> [ (i,n) | i<-[1..((Vector.length s) - n + 1)] ] ) kmerlens
+	contains (i,k) = (feature (i, Vector.length k) s) == (i,k)
 	feature (i,n) s = (i, Vector.take n $ Vector.drop (i-1) s)
 
 comb n xs = comb' n xs [[]] where
